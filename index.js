@@ -45,6 +45,7 @@ async function run() {
     const reviewCollection = client.db("bistroDb").collection("reviews");
     const cartCollection = client.db("bistroDb").collection("carts");
     const userCollection = client.db("shiplyDb").collection("users");
+    const bookingCollection = client.db("shiplyDb").collection("bookings");
     const paymentCollection = client.db("bistroDb").collection("payments");
 
     //jwt related api
@@ -98,17 +99,11 @@ async function run() {
     };
 
     //users related api
-    app.get(
-      "/users",
-      verifyToken,
-      verifyAdmin,
-      verifyDeliveryMan,
-      async (req, res) => {
-        console.log(req.headers);
-        const result = await userCollection.find().toArray();
-        res.send(result);
-      }
-    );
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+      console.log(req.headers);
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    });
 
     app.get("/users/admin/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -122,21 +117,6 @@ async function run() {
         admin = user?.role === "admin";
       }
       res.send({ admin });
-    });
-
-    //deliveryMan Api
-    app.get("/users/deliveryman/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-      if (email !== req.decoded.email) {
-        return res.status(403).send({ message: "forbidden access" });
-      }
-      const query = { email: email };
-      const user = await userCollection.findOne(query);
-      let deliveryMan = false;
-      if (user) {
-        deliveryMan = user?.role === "deliveryman";
-      }
-      res.send({ deliveryMan });
     });
 
     app.post("/users", async (req, res) => {
@@ -173,6 +153,46 @@ async function run() {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await userCollection.deleteOne(query);
+      res.send(result);
+    });
+    //deliveryMan Api
+    app.get("/users/deliveryman/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      let deliveryMan = false;
+      if (user) {
+        deliveryMan = user?.role === "deliveryman";
+      }
+      res.send({ deliveryMan });
+    });
+
+    app.patch(
+      "/users/deliveryman/:id",
+      verifyToken,
+      verifyAdmin,
+
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            role: "deliveryman",
+          },
+        };
+        const result = await userCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+        console.log(result);
+      }
+    );
+
+    //booking related apis
+    app.post("/booking", async (req, res) => {
+      const booking = req.body;
+      const result = await bookingCollection.insertOne(booking);
       res.send(result);
     });
 
