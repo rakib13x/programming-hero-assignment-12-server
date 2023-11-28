@@ -17,8 +17,8 @@ app.use(
 );
 app.use(express.json());
 
-console.log(process.env.DB_PASS);
-console.log(process.env.DB_User);
+// console.log(process.env.DB_PASS);
+// console.log(process.env.DB_User);
 
 app.get("/", (req, res) => {
   res.send("shiply is Running");
@@ -59,7 +59,7 @@ async function run() {
 
     //middlewares
     const verifyToken = (req, res, next) => {
-      console.log("inside verify token", req.headers.authorization);
+      // console.log("inside verify token", req.headers.authorization);
       if (!req.headers.authorization) {
         return res.status(401).send({ message: "unauthorized access" });
       }
@@ -100,7 +100,7 @@ async function run() {
 
     //users related api
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
-      console.log(req.headers);
+      // console.log(req.headers);
       const result = await userCollection.find().toArray();
       res.send(result);
     });
@@ -185,12 +185,66 @@ async function run() {
         };
         const result = await userCollection.updateOne(filter, updatedDoc);
         res.send(result);
-        console.log(result);
+        // console.log(result);
       }
     );
 
     //booking related apis
-    app.post("/booking", async (req, res) => {
+    app.get("/bookings", async (req, res) => {
+      // console.log(req.headers);
+      const result = await bookingCollection.find().toArray();
+      res.send(result);
+    });
+    app.get("/bookings/:email", async (req, res) => {
+      const email = req.query.email;
+      const query = { email: email };
+      const result = await bookingCollection.find(query).toArray();
+      res.send(result);
+      // console.log(result);
+    });
+    app.patch("/bookings/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        console.log("Received PATCH request for booking ID:", id);
+        console.log("Request Payload:", req.body);
+
+        const filter = { _id: new ObjectId(id) };
+        const { deliveryMenID } = req.body;
+        console.log("Received deliveryMenID:", deliveryMenID);
+
+        // Log the existing document before the update
+        const existingDocument = await bookingCollection.findOne(filter);
+        console.log("Existing Document:", existingDocument);
+
+        const updateDoc = {
+          $set: {
+            status: "on the way",
+            deliveryMenID,
+          },
+        };
+
+        const result = await bookingCollection.updateOne(filter, updateDoc);
+        console.log("Update Result:", result);
+
+        // Check if the document was found and modified
+        if (result.matchedCount > 0) {
+          res
+            .status(200)
+            .json({ success: true, message: "Booking updated successfully" });
+        } else {
+          res.status(404).json({
+            success: false,
+            message: "Booking not found or not updated",
+          });
+        }
+      } catch (error) {
+        console.error("Error in updateOne:", error);
+        res
+          .status(500)
+          .json({ success: false, message: "Internal Server Error" });
+      }
+    });
+    app.post("/bookings", async (req, res) => {
       const booking = req.body;
       const result = await bookingCollection.insertOne(booking);
       res.send(result);
