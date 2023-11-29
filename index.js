@@ -99,11 +99,17 @@ async function run() {
     };
 
     //users related api
-    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
-      // console.log(req.headers);
-      const result = await userCollection.find().toArray();
-      res.send(result);
-    });
+    app.get(
+      "/users",
+      verifyToken,
+      verifyAdmin,
+
+      async (req, res) => {
+        // console.log(req.headers);
+        const result = await userCollection.find().toArray();
+        res.send(result);
+      }
+    );
 
     app.get("/users/admin/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -149,20 +155,28 @@ async function run() {
       }
     );
 
-    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await userCollection.deleteOne(query);
-      res.send(result);
-    });
+    app.delete(
+      "/users/:id",
+      verifyToken,
+      verifyAdmin,
+
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await userCollection.deleteOne(query);
+        res.send(result);
+      }
+    );
     //deliveryMan Api
     app.get("/users/deliveryman/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
       if (email !== req.decoded.email) {
         return res.status(403).send({ message: "forbidden access" });
       }
       const query = { email: email };
-      const user = await userCollection.findOne(query);
+      const user = await userCollection.findOne(query, filter);
       let deliveryMan = false;
       if (user) {
         deliveryMan = user?.role === "deliveryman";
@@ -197,6 +211,7 @@ async function run() {
     });
     app.get("/bookings/:email", async (req, res) => {
       const email = req.query.email;
+      console.log("received email", email);
       const query = { email: email };
       const result = await bookingCollection.find(query).toArray();
       res.send(result);
@@ -209,8 +224,8 @@ async function run() {
         console.log("Request Payload:", req.body);
 
         const filter = { _id: new ObjectId(id) };
-        const { deliveryMenID } = req.body;
-        console.log("Received deliveryMenID:", deliveryMenID);
+        const { deliveryMenID, deliveryMenMail } = req.body;
+        console.log("Received deliveryMenID:", deliveryMenID, deliveryMenMail);
 
         // Log the existing document before the update
         const existingDocument = await bookingCollection.findOne(filter);
@@ -220,6 +235,7 @@ async function run() {
           $set: {
             status: "on the way",
             deliveryMenID,
+            deliveryMenMail,
           },
         };
 
@@ -239,6 +255,75 @@ async function run() {
         }
       } catch (error) {
         console.error("Error in updateOne:", error);
+        res
+          .status(500)
+          .json({ success: false, message: "Internal Server Error" });
+      }
+    });
+    app.put("/bookings/cancel/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        console.log("Received cancel request for booking ID:", id);
+        console.log("Request Payload:", req.body);
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            productStatus: "cancelled",
+          },
+        };
+
+        const result = await bookingCollection.updateOne(filter, updateDoc);
+        console.log("Cancel Result:", result);
+
+        // Check if the document was found and modified
+        if (result.matchedCount > 0) {
+          res
+            .status(200)
+            .json({ success: true, message: "Booking canceled successfully" });
+        } else {
+          res.status(404).json({
+            success: false,
+            message: "Booking not found or not canceled",
+          });
+        }
+      } catch (error) {
+        console.error("Error in cancel request:", error);
+        res
+          .status(500)
+          .json({ success: false, message: "Internal Server Error" });
+      }
+    });
+
+    app.put("/bookings/deliver/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        console.log("Received deliver request for booking ID:", id);
+        console.log("Request Payload:", req.body);
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            orderStatus: "delivered",
+          },
+        };
+
+        const result = await bookingCollection.updateOne(filter, updateDoc);
+        console.log("Deliver Result:", result);
+
+        // Check if the document was found and modified
+        if (result.matchedCount > 0) {
+          res
+            .status(200)
+            .json({ success: true, message: "Booking delivered successfully" });
+        } else {
+          res.status(404).json({
+            success: false,
+            message: "Booking not found or not delivered",
+          });
+        }
+      } catch (error) {
+        console.error("Error in deliver request:", error);
         res
           .status(500)
           .json({ success: false, message: "Internal Server Error" });
