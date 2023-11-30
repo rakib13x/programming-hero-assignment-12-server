@@ -41,12 +41,11 @@ async function run() {
 
     // Send a ping to confirm a successful connection
     //bistro Database
-    const menuCollection = client.db("bistroDb").collection("menu");
-    const reviewCollection = client.db("bistroDb").collection("reviews");
-    const cartCollection = client.db("bistroDb").collection("carts");
+
     const userCollection = client.db("shiplyDb").collection("users");
     const bookingCollection = client.db("shiplyDb").collection("bookings");
-    const paymentCollection = client.db("bistroDb").collection("payments");
+    const reviewCollection = client.db("shiplyDb").collection("reviews");
+    const paymentCollection = client.db("shiplyDb").collection("payments");
 
     //jwt related api
     app.post("/jwt", async (req, res) => {
@@ -210,7 +209,7 @@ async function run() {
       res.send(result);
     });
     app.get("/bookings/:email", async (req, res) => {
-      const email = req.query.email;
+      const email = req.params.email;
       console.log("received email", email);
       const query = { email: email };
       const result = await bookingCollection.find(query).toArray();
@@ -269,7 +268,7 @@ async function run() {
         const filter = { _id: new ObjectId(id) };
         const updateDoc = {
           $set: {
-            productStatus: "cancelled",
+            status: "cancelled",
           },
         };
 
@@ -304,7 +303,7 @@ async function run() {
         const filter = { _id: new ObjectId(id) };
         const updateDoc = {
           $set: {
-            orderStatus: "delivered",
+            status: "delivered",
           },
         };
 
@@ -335,6 +334,96 @@ async function run() {
       res.send(result);
     });
 
+    //deliveryman
+    app.get("/deliverymen", async (req, res) => {
+      const deliverymen = await userCollection
+        .find({ role: "deliveryman" })
+        .toArray();
+      res.send(deliverymen);
+    });
+
+    //review api
+    app.get(
+      "/reviews",
+
+      async (req, res) => {
+        const result = await reviewCollection.find().toArray();
+        res.send(result);
+      }
+    );
+
+    app.post("/reviews", async (req, res) => {
+      const review = req.body;
+      const result = await reviewCollection.insertOne(review);
+      res.send(result);
+    });
+
+    //payment intent
+    app.post("/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+
+      res.send({ clientSecret: paymentIntent.client_secret });
+    });
+
+    app.get("/payments/:email", verifyToken, async (req, res) => {
+      const query = { email: req.params.email };
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const result = await paymentCollection.find().toArray();
+      res.send(result);
+    });
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment);
+
+      //carefully delete each item from the cart
+      console.log("payment info", payment);
+      const query = {
+        _id: {
+          $in: payment.cartIds.map((id) => new ObjectId(id)),
+        },
+      };
+      const deleteResult = await bookingCollection.deleteMany(query);
+      res.send({ paymentResult, deleteResult });
+    });
+
+    //stats
+    app.get("/stats", async (req, res) => {
+      const users = await userCollection.estimatedDocumentCount();
+      const booked = await bookingCollection.estimatedDocumentCount();
+      const delivered = await bookingCollection
+        .aggregate([
+          {
+            $match: {
+              status: "delivered",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalDelivered: {
+                $sum: 1,
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0, // Exclude _id field
+              totalDelivered: 1,
+            },
+          },
+        ])
+        .toArray();
+      res.send({ users, booked, delivered });
+    });
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
