@@ -6,15 +6,18 @@ const cookieParser = require("cookie-parser");
 const port = process.env.PORT || 3000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 // const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
+// CORS middleware
 //middleware
 app.use(cookieParser());
-app.use(
-  cors({
-    // origin: ["http://localhost:5174"],
-    // credentials: true,
-  })
-);
+// const corsOptions = {
+//   origin: "https://shiply-ea44d.web.app", // Replace with your frontend domain
+//   credentials: true, // Enable credentials (cookies, authorization headers, etc.)
+// };
+
+app.use(cors());
 app.use(express.json());
 
 // console.log(process.env.DB_PASS);
@@ -106,6 +109,7 @@ async function run() {
       async (req, res) => {
         // console.log(req.headers);
         const result = await userCollection.find().toArray();
+
         res.send(result);
       }
     );
@@ -121,6 +125,7 @@ async function run() {
       if (user) {
         admin = user?.role === "admin";
       }
+
       res.send({ admin });
     });
 
@@ -180,6 +185,7 @@ async function run() {
       if (user) {
         deliveryMan = user?.role === "deliveryman";
       }
+
       res.send({ deliveryMan });
     });
 
@@ -203,16 +209,53 @@ async function run() {
     );
 
     //booking related apis
+
     app.get("/bookings", async (req, res) => {
-      // console.log(req.headers);
-      const result = await bookingCollection.find().toArray();
+      let query = {}; // Default query to fetch all data
+
+      // If fromDate and toDate are provided, update the query
+      if (req.query.fromDate && req.query.toDate) {
+        query = {
+          bookingDate: {
+            $gte: req.query.fromDate,
+            $lte: req.query.toDate,
+          },
+        };
+      }
+
+      const result = await bookingCollection.find(query).toArray();
+      console.log(result);
+
       res.send(result);
     });
+    // app.get("/bookings", async (req, res) => {
+    //   const fromDate = req.query.fromDate;
+    //   let toDate = req.query.toDate;
+
+    //   // Set the time part of toDate to 23:59:59.999
+    //   const endTime = new Date(toDate);
+    //   endTime.setHours(23, 59, 59, 999);
+
+    //   const query = {
+    //     bookingDate: {
+    //       $gte: new Date(fromDate),
+    //       $lte: endTime,
+    //     },
+    //   };
+
+    //   console.log("Received fromDate:", fromDate);
+    //   console.log("Received toDate:", toDate);
+    //   console.log("Query:", query);
+
+    //   const result = await bookingCollection.find(query).toArray();
+    //   res.send(result);
+    // });
     app.get("/bookings/:email", async (req, res) => {
       const email = req.params.email;
       console.log("received email", email);
       const query = { email: email };
       const result = await bookingCollection.find(query).toArray();
+
       res.send(result);
       // console.log(result);
     });
@@ -223,8 +266,13 @@ async function run() {
         console.log("Request Payload:", req.body);
 
         const filter = { _id: new ObjectId(id) };
-        const { deliveryMenID, deliveryMenMail } = req.body;
-        console.log("Received deliveryMenID:", deliveryMenID, deliveryMenMail);
+        const { deliveryMenID, deliveryMenMail, approxDate } = req.body;
+        console.log(
+          "Received deliveryMenID:",
+          deliveryMenID,
+          deliveryMenMail,
+          approxDate
+        );
 
         // Log the existing document before the update
         const existingDocument = await bookingCollection.findOne(filter);
@@ -235,6 +283,7 @@ async function run() {
             status: "on the way",
             deliveryMenID,
             deliveryMenMail,
+            approxDate,
           },
         };
 
@@ -258,6 +307,12 @@ async function run() {
           .status(500)
           .json({ success: false, message: "Internal Server Error" });
       }
+    });
+    app.delete("/booking/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingCollection.deleteOne(query);
+      res.send(result);
     });
     app.put("/bookings/cancel/:id", async (req, res) => {
       try {
@@ -339,6 +394,7 @@ async function run() {
       const deliverymen = await userCollection
         .find({ role: "deliveryman" })
         .toArray();
+
       res.send(deliverymen);
     });
 
@@ -348,6 +404,7 @@ async function run() {
 
       async (req, res) => {
         const result = await reviewCollection.find().toArray();
+
         res.send(result);
       }
     );
@@ -378,6 +435,7 @@ async function run() {
         return res.status(403).send({ message: "forbidden access" });
       }
       const result = await paymentCollection.find().toArray();
+
       res.send(result);
     });
     app.post("/payments", async (req, res) => {
@@ -388,11 +446,18 @@ async function run() {
       console.log("payment info", payment);
       const query = {
         _id: {
-          $in: payment.cartIds.map((id) => new ObjectId(id)),
+          $in: payment.bookingIds.map((id) => new ObjectId(id)),
         },
       };
       const deleteResult = await bookingCollection.deleteMany(query);
       res.send({ paymentResult, deleteResult });
+    });
+
+    //topdeliverymen
+    app.get("/topdeliveryman", async (req, res) => {
+      const result = await userCollection.find().toArray();
+
+      res.send(result);
     });
 
     //stats
@@ -422,12 +487,73 @@ async function run() {
           },
         ])
         .toArray();
+
       res.send({ users, booked, delivered });
     });
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+
+    app.get("/topdeliverymen", async (req, res) => {
+      try {
+        // Get total users
+        const users = await userCollection.estimatedDocumentCount();
+
+        // Get total booked
+        const booked = await bookingCollection.estimatedDocumentCount();
+
+        // Get top 5 deliverymen based on total deliveries
+        const topDeliverymen = await bookingCollection
+          .aggregate([
+            {
+              $match: {
+                status: "delivered",
+              },
+            },
+            {
+              $group: {
+                _id: "$deliveryMenID",
+                totalDeliveries: {
+                  $sum: 1,
+                },
+              },
+            },
+            {
+              $sort: {
+                totalDeliveries: -1,
+              },
+            },
+            {
+              $limit: 5,
+            },
+            {
+              $lookup: {
+                from: "deliverymenCollection",
+                localField: "_id",
+                foreignField: "_id",
+                as: "deliverymanDetails",
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                deliverymanID: "$_id",
+                totalDeliveries: 1,
+                deliverymanDetails: {
+                  $arrayElemAt: ["$deliverymanDetails", 0],
+                },
+              },
+            },
+          ])
+          .toArray();
+
+        res.send({ topDeliverymen });
+      } catch (error) {
+        console.error("Error fetching stats:", error);
+        res.status(500).send("Internal Server Error");
+      }
+    });
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
